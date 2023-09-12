@@ -1,13 +1,11 @@
 # Video Analytics
-
 This is a project to track pauses, skips, watch duration, speed change, etc among other datapoints in a video using React. 
 
 ## Technologies Used
-
-- JavaScript: For writing code logic and JSX content.
+- TypeScript: For writing code logic.
+- JavaScript: For writing JSX content.
 - React: A JavaScript library used for building user interfaces.
 - Tailwind CSS: Used for structuring and styling the interface.
-
 
 ## Installation
 1. Clone the repository.
@@ -27,5 +25,4 @@ This is a project to track pauses, skips, watch duration, speed change, etc amon
    `npm start`
 
 ## Project Deployment
-
 The web-app is deployed [here](https://video-analytics-vaiibhavgupta.vercel.app).
