@@ -296,7 +296,8 @@ const VideoPlayer: React.FC = () => {
         <ReactPlayer
           ref={playerRef}
           // url="https://www.youtube.com/watch?v=RpaxxN8jTHo"
-          url="https://www.youtube.com/watch?v=EiYm20F9WXU"
+          // url="https://www.youtube.com/watch?v=EiYm20F9WXU"
+          url="https://www.youtube.com/watch?v=d18ibbOWlXc"
           controls
           onProgress={handleProgress}
           onPlaybackRateChange={handlePlaybackRateChange}
