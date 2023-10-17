@@ -1,322 +1,324 @@
-import ReactPlayer from "react-player";
+import YouTube from "react-youtube";
 import React, { useState, useEffect, useRef } from "react";
+
+// import supabase from "./supabaseClient";
 import calculateAggWatchedDuration from "./UpdateAggWatchedDuration";
 
-// export default function VideoPlayer() {
 const VideoPlayer: React.FC = () => {
-  interface Progress {
-    playedSeconds: number;
-  }
-
-  interface Location {
+  // for events where we need to store both start and end point of reference (relative location in video (#seconds played))
+  interface DualDataPointWOTS {
     start: number;
     end: number;
   }
 
-  interface SpeedChange {
-    location: number;
-    speed: number;
+  // for events where we need to store both start and end point of reference (relative location in video (#seconds played)) and the event occurrence timestamp
+  interface DualDataPoint {
+    start: number;
+    end: number;
+    timestamp: number;
   }
 
-  interface SpeedTimestamp {
+  // for events where we need to store only a single point of reference (relative location in video (#seconds played)) and the event occurrence timestamp
+  interface SingleDataPoint {
+    location: number;
+    timestamp: number;
+  }
+  // to store event data when users change payback rate of the video
+  interface SingleDataPointPBR {
+    location: number;
     timestamp: number;
     speed: number;
   }
 
-  // interface PlayerInstance {
-  //   getCurrentTime: () => number;
-  // }
+  const [player, setPlayer] = useState<YouTube | null>(null);
 
-  // const divRef = useRef(null);
+  // implement - oof video location, tab switch video location
   const divRef = useRef<HTMLDivElement | null>(null);
-  // const [endPointOOF, setEndPointOOF] = useState(0);
-  const [endPointOOF, setEndPointOOF] = useState<number>(0);
-  // const [startPointOOF, setStartPointOOF] = useState(0);
-  const [startPointOOF, setStartPointOOF] = useState<number>(0);
-
-  // const [isVideoPlaying, setIsVideoPlaying] = useState(false);
+  // a flag to show if video is playing or is paused or ended
   const [isVideoPlaying, setIsVideoPlaying] = useState<boolean>(false);
-  // const [startPointTabSwitch, setStartPointTabSwitch] = useState(0);
-  const [startPointTabSwitch, setStartPointTabSwitch] = useState<number>(0);
-  // const [endPointTabSwitch, setEndPointTabSwitch] = useState(0);
-  const [endPointTabSwitch, setEndPointTabSwitch] = useState<number>(0);
-
-  // const [watchDuration, setWatchDuration] = useState(0);
-  const [watchDuration, setWatchDuration] = useState<number>(0);
-  // const [updatedFlag, setUpdatedFlag] = useState(false);
+  // a flag to show if video frame is out-of-focus (true)
+  const [isOOF, setIsOOF] = useState<boolean>(false);
+  // a flag to show if tab is switched to something else (true)
+  const [isTS, setIsTS] = useState<boolean>(false);
+  // a flag that is set to true when variables are updated
   const [updatedFlag, setUpdatedFlag] = useState<boolean>(false);
-  // const [startPoint, setStartPoint] = useState(0);
+  // to register start and end timestamps for out-of-focus events
+  const [endPointOOFDataPoints, setEndPointOOFDataPoints] = useState<SingleDataPoint[]>([]);
+  const [startPointOOFDataPoints, setStartPointOOFDataPoints] = useState<SingleDataPoint[]>([]);
+  // to register start and end timestamps for tab-switch events
+  const [startPointTSDataPoints, setStartPointTSDataPoints] = useState<SingleDataPoint[]>([]);
+  const [endPointTSDataPoints, setEndPointTSDataPoints] = useState<SingleDataPoint[]>([]);
+  // for setting watched location timestamps
   const [startPoint, setStartPoint] = useState<number>(0);
-
-  // const [skippedLocation, setSkippedLocation] = useState([]);
-  const [skippedLocation, setSkippedLocation] = useState<Location[]>([]);
-  // const [skippedTimestamp, setSkippedTimestamp] = useState([]);
-  const [skippedTimestamp, setSkippedTimestamp] = useState<number[]>([]);
-  // const [watchedLocation, setWatchedLocation] = useState([]);
-  const [watchedLocation, setWatchedLocation] = useState<Location[]>([]);
-  // const [outOfFocusTimeStamp, setOutOfFocusTimestamp] = useState([]);
-  const [outOfFocusTimestamp, setOutOfFocusTimestamp] = useState<Location[]>([]);
-  // const [tabSwitchTimeStamp, setTabSwitchTimestamp] = useState([]);
-  const [tabSwitchTimestamp, setTabSwitchTimestamp] = useState<Location[]>([]);
-
-  // const [speedChangeLocation, setSpeedChangeLocation] = useState([{ location: 0, speed: 1 }]);
-  const [speedChangeLocation, setSpeedChangeLocation] = useState<SpeedChange[]>([{ location: 0, speed: 1 }]);
-
-  // const [speedChangeTimestamp, setSpeedChangeTimestamp] = useState([{ timestamp: Math.floor(Date.now() / 1000), speed: 1 },]);
-  const [speedChangeTimestamp, setSpeedChangeTimestamp] = useState<SpeedTimestamp[]>([
-    { timestamp: Math.floor(Date.now() / 1000), speed: 1 },
+  // to store present location in the video (in secs)
+  const [watchDuration, setWatchDuration] = useState<number>(0);
+  // to store last location in the video (in secs)
+  // const [prevLocation, setPrevLocation] = useState<number>(null);
+  // to store custom video events - skipped locations and event timestamp
+  const [skippedDataPoints, setSkippedDataPoints] = useState<DualDataPoint[]>([]);
+  // to store custom video events - chunks of video watched
+  const [watchedDataPoints, setWatchedDataPoints] = useState<DualDataPointWOTS[]>([]);
+  // to store playbackrate modifications
+  const [pbrDataPoints, setPBRDataPoints] = useState<SingleDataPointPBR[]>([
+    { location: 0, timestamp: Math.floor(Date.now() / 1000), speed: 1 },
   ]);
-
-  const playerRef = useRef(null);
-  // const playerRef = useRef<PlayerInstance>(null);
-
-  // const [pauseLocation, setPauseLocation] = useState([]);
-  const [pauseLocation, setPauseLocation] = useState<number[]>([]);
-
-  // const [pauseTimestamp, setPauseTimestamp] = useState([]);
-  const [pauseTimestamp, setPauseTimestamp] = useState<number[]>([]);
-
+  // to store pause events data
+  const [pauseDataPoints, setPauseDataPoints] = useState<SingleDataPoint[]>([]);
+  // aggregate watch duration of the video => total - skips
   const [aggWatchedDuration, setAggWatchedDuration] = useState(0);
 
   // capture timestamps when video goes out-of-focus or comes back in-focus
   useEffect(() => {
     const handleIntersection = (entries: IntersectionObserverEntry[]) => {
       entries.forEach(({ isIntersecting }) => {
-        const currentTime = Math.floor(Date.now() / 1000);
-        if (isIntersecting) {
-          setEndPointOOF(currentTime);
-        } else {
-          setStartPointOOF(currentTime);
+        if (isIntersecting && isVideoPlaying) {
+          setIsOOF(false);
+        } else if (!isIntersecting && isVideoPlaying) {
+          setIsOOF(true);
         }
       });
+      console.log("In useEffect OOF", isOOF);
     };
 
     const observer = new IntersectionObserver(handleIntersection, {
       root: null,
       rootMargin: "0px",
-      threshold: 1,
+      threshold: 1, // set according to % of screen visible for logging as not in focus - 0.75 means 25% or more of the screen should not be in frame to be invisible.
     });
-
     if (divRef.current) {
       observer.observe(divRef.current);
     }
-
     return () => {
       observer.disconnect();
     };
-  }, []);
-
-  // useEffect(() => {
-  //   const observer = new IntersectionObserver(handleIntersection, {
-  //     root: null,
-  //     rootMargin: "0px",
-  //     threshold: 1,
-  //   });
-  //   if (divRef.current) {
-  //     observer.observe(divRef.current);
-  //   }
-  //   return () => {
-  //     if (divRef.current) {
-  //       observer.unobserve(divRef.current);
-  //     }
-  //   };
-  // }, []);
-
-  // const handleIntersection = (entries) => {
-  //   entries.forEach((entry) => {
-  //     if (entry.isIntersecting) {
-  //       setEndPointOOF(Math.floor(Date.now() / 1000));
-  //     } else {
-  //       setStartPointOOF(Math.floor(Date.now() / 1000));
-  //     }
-  //   });
-  // };
+  });
 
   // capture timestamp when user navigates to a different tab and returns
   useEffect(() => {
     const handleVisibilityChange = () => {
-      if (!isVideoPlaying) return;
-
-      const currentTime = Math.floor(Date.now() / 1000);
-      if (document.hidden) {
-        setStartPointTabSwitch(currentTime);
-      } else {
-        setEndPointTabSwitch(currentTime);
+      if (document.hidden && isVideoPlaying) {
+        setIsTS(true);
+      } else if (!document.hidden && isVideoPlaying) {
+        setIsTS(false);
       }
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    console.log("In useEffect TS", isTS);
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   });
 
+  // update data in supabase. we would want to modify this to when and how often we should be pushing data into supabase.
+  // just formulating the datastructure that langdon suggested to store video events data.
   // useEffect(() => {
-  //   const handleVisibilityChange = () => {
-  //     if (isVideoPlaying) {
-  //       if (document.hidden) {
-  //         // console.log("User switched tabs while video was playing!", Math.floor(Date.now() / 1000));
-  //         setStartPointTabSwitch(Math.floor(Date.now() / 1000));
-  //       } else {
-  //         // console.log("tab in focus!", Math.floor(Date.now() / 1000));
-  //         setEndPointTabSwitch(Math.floor(Date.now() / 1000));
-  //       }
+  //   const storeDataInSupabase = async () => {
+  //     const { data, error } = await supabase.from("video_events").insert([
+  //       {
+  //         id: "id",
+  //         video_id: "video_id",
+  //         event_type: "event_type",
+  //         user_id: "user_id",
+  //         created_at: new Date(),
+  //         data: {
+  //           skips: skippedDataPoints,
+  //           pauses: pauseDataPoints,
+  //           playbackrates: pbrDataPoints,
+  //           back_in_focus: endPointOOFDataPoints,
+  //           went_out_of_focus: startPointOOFDataPoints,
+  //           tab_switched_in: endPointTSDataPoints,
+  //           tab_switched_out: startPointTSDataPoints,
+  //           watched_chunks: watchedDataPoints,
+  //         },
+  //         watch_duration: aggWatchedDuration,
+  //       },
+  //     ]);
+
+  //     if (error) {
+  //       console.error("Error storing data in Supabase:", error);
   //     }
   //   };
-  //   // Add event listeners
-  //   document.addEventListener("visibilitychange", handleVisibilityChange);
-  //   // Cleanup the event listeners on unmount
-  //   return () => {
-  //     document.removeEventListener("visibilitychange", handleVisibilityChange);
-  //   };
-  // });
 
-  // update watch duration and many other variables
-  const handleProgress = (progress: Progress) => {
-    const currentTime = progress.playedSeconds;
-    updateSkippedAndWatchedLocations(currentTime);
-    updateOutOfFocusTimestamps();
-    updateTabSwitchTimestamps();
-    setWatchDuration(currentTime);
-  };
+  //   // need to modify: condition when to store data in supabase
+  //   if (true) {
+  //     storeDataInSupabase();
+  //   }
+  //   // need to modify: dependencies
+  // }, [
+  //   aggWatchedDuration,
+  //   skippedDataPoints,
+  //   pauseDataPoints,
+  //   pbrDataPoints,
+  //   endPointOOFDataPoints,
+  //   startPointOOFDataPoints,
+  //   endPointTSDataPoints,
+  //   startPointTSDataPoints,
+  //   watchedDataPoints,
+  // ]);
 
-  const updateSkippedAndWatchedLocations = (currentTime: number) => {
-    if (Math.abs(currentTime - watchDuration) > 1.1 * speedChangeLocation.slice(-1)[0].speed) {
-      setSkippedLocation((prevLocations: Location[]) => [...prevLocations, { start: watchDuration, end: currentTime }]);
-      setSkippedTimestamp((prevTimestamps: number[]) => [...prevTimestamps, Math.floor(Date.now() / 1000)]);
-
-      setWatchedLocation((prevLocations: Location[]) => [...prevLocations, { start: startPoint, end: watchDuration }]);
-
-      setStartPoint(currentTime);
-      setUpdatedFlag(true);
-    }
-  };
-
-  const updateOutOfFocusTimestamps = () => {
-    if (endPointOOF > startPointOOF && startPointOOF > 0) {
-      setOutOfFocusTimestamp((prevTimestamps: Location[]) => [
-        ...prevTimestamps,
-        { start: startPointOOF, end: endPointOOF },
-      ]);
-      setStartPointOOF(0);
-    }
-  };
-
-  const updateTabSwitchTimestamps = () => {
-    if (endPointTabSwitch > startPointTabSwitch && startPointTabSwitch > 0) {
-      setTabSwitchTimestamp((prevTimestamps: Location[]) => [
-        ...prevTimestamps,
-        { start: startPointTabSwitch, end: endPointTabSwitch },
-      ]);
-      setStartPointTabSwitch(0);
-    }
-  };
-  // const handleProgress = (progress) => {
-  // const currentTime = progress.playedSeconds;
-  // if (Math.abs(currentTime - watchDuration) > 1.1 * speedChangeLocation.slice(-1)[0].speed) {
-  //   setSkippedLocation((prevLocations) => [...prevLocations, { start: watchDuration, end: currentTime }]);
-  //   setSkippedTimestamp((prevTimestamps) => [...prevTimestamps, Math.floor(Date.now() / 1000)]);
-  //   let allPriorWatchedLocations = watchedLocation;
-  //   allPriorWatchedLocations.push({ start: startPoint, end: watchDuration });
-  //   setWatchedLocation(allPriorWatchedLocations);
-  //   setStartPoint(currentTime);
-  //   setUpdatedFlag(true);
-  // }
-  // setWatchDuration(currentTime);
-  // if (endPointOOF > startPointOOF && startPointOOF > 0) {
-  //   setOutOfFocusTimestamp((prevTimestamps) => [...prevTimestamps, { start: startPointOOF, end: endPointOOF }]);
-  //   setStartPointOOF(0);
-  // }
-  // if (endPointTabSwitch > startPointTabSwitch && startPointTabSwitch > 0) {
-  //   setTabSwitchTimestamp((prevTimestamps) => [
-  //     ...prevTimestamps,
-  //     { start: startPointTabSwitch, end: endPointTabSwitch },
-  //   ]);
-  //   setStartPointTabSwitch(0);
-  // }
-  // };
-
-  // update locations and timestamps when playback speed is changed
-  const handlePlaybackRateChange = (newPlaybackRate: number) => {
-    const newLocation: SpeedChange = {
-      location: watchDuration,
-      speed: newPlaybackRate,
-    };
-
-    const newTimestamp: SpeedTimestamp = {
-      timestamp: Math.floor(Date.now() / 1000),
-      speed: newPlaybackRate,
-    };
-
-    setSpeedChangeLocation((prevLocations) => [...prevLocations, newLocation]);
-    setSpeedChangeTimestamp((prevTimestamps) => [...prevTimestamps, newTimestamp]);
-  };
-
-  // const handlePlaybackRateChange = (newPlaybackRate) => {
-  //   setSpeedChangeLocation((prevLocations) => [...prevLocations, { location: watchDuration, speed: newPlaybackRate }]);
-  //   setSpeedChangeTimestamp((prevTimestamps) => [
-  //     ...prevTimestamps,
-  //     { timestamp: Math.floor(Date.now() / 1000), speed: newPlaybackRate },
-  //   ]);
-  // };
-
-  // update pause timestamps and locations
-  const handlePlay = () => {
-    const currentTime = playerRef.current.getCurrentTime();
-    if (currentTime > 1 && currentTime > watchDuration && currentTime - watchDuration < 1) {
-      if (skippedLocation.length > 0) {
-        // this if else loop prevents registration of a pause within a second of a skip.
-        // checking if length of skippedTimestamps > 0 to apply the logic.
-        // if length = 0, then register a pause as there are no skips yet.
-        if (currentTime - skippedLocation.slice(-1)[0].end > 1) {
-          setPauseLocation((prevLocations) => [...prevLocations, currentTime]);
-          setPauseTimestamp((prevTimestamps) => [...prevTimestamps, Math.floor(Date.now() / 1000)]);
-        }
-      } else {
-        setPauseLocation((prevLocations) => [...prevLocations, currentTime]);
-        setPauseTimestamp((prevTimestamps) => [...prevTimestamps, Math.floor(Date.now() / 1000)]);
+  // function that updates location and timestamps for events when tab with the video frame is not actively dislayed on the screen
+  const updateTabSwitch = (currentLocation: number, currentTimestamp: number) => {
+    if (isVideoPlaying) {
+      // if else loop to control events that are registered - register end points only after start point has been registered and register only one end point corresponding to each start point.
+      if (isTS && startPointTSDataPoints.length === endPointTSDataPoints.length) {
+        setStartPointTSDataPoints((prevDataPoints) => [
+          ...prevDataPoints,
+          { location: currentLocation, timestamp: currentTimestamp },
+        ]);
+      } else if (!isTS && startPointTSDataPoints.length - 1 === endPointTSDataPoints.length) {
+        setEndPointTSDataPoints((prevDataPoints) => [
+          ...prevDataPoints,
+          { location: currentLocation, timestamp: currentTimestamp },
+        ]);
       }
     }
   };
 
+  // function that updates location and timestamps for events when tab with the video frame is not actively dislayed on the screen
+  const updateOutOfFocus = (currentLocation: number, currentTimestamp: number) => {
+    if (isVideoPlaying) {
+      // if else loop to control events that are registered - register end points only after start point has been registered and register only one end point corresponding to each start point.
+      if (isOOF && startPointOOFDataPoints.length === endPointOOFDataPoints.length) {
+        setStartPointOOFDataPoints((prevDataPoints) => [
+          ...prevDataPoints,
+          { location: currentLocation, timestamp: currentTimestamp },
+        ]);
+      } else if (!isOOF && startPointOOFDataPoints.length - 1 === endPointOOFDataPoints.length) {
+        setEndPointOOFDataPoints((prevDataPoints) => [
+          ...prevDataPoints,
+          { location: currentLocation, timestamp: currentTimestamp },
+        ]);
+      }
+    }
+  };
+
+  // function to update skipped locations and timestamps. in addition, update the watched duration.
+  const updateSkippedAndWatchedLocations = (currentLocation: number, currentTimestamp: number) => {
+    // adjusting skipped location logic w.r.t. playbackspeed. if not accounted for, then unusual skips are registered when playbackspeed != 1
+    if (Math.abs(currentLocation - watchDuration) > 1.1 * pbrDataPoints.slice(-1)[0].speed) {
+      setSkippedDataPoints((prevDataPoints) => [
+        ...prevDataPoints,
+        { start: watchDuration, end: currentLocation, timestamp: currentTimestamp },
+      ]);
+
+      setWatchedDataPoints((prevDataPoints) => [...prevDataPoints, { start: startPoint, end: watchDuration }]);
+      setStartPoint(currentLocation);
+      setUpdatedFlag(true);
+    }
+  };
+
+  // update watch duration and many other variables
+  const handleProgress = (currentLocation: number, currentTimestamp: number) => {
+    // console.log("handleprogress - watchDuration", watchDuration);
+    updateTabSwitch(currentLocation, currentTimestamp);
+    updateOutOfFocus(currentLocation, currentTimestamp);
+    updateSkippedAndWatchedLocations(currentLocation, currentTimestamp);
+    setWatchDuration(currentLocation);
+    console.log("handleprogress - watchDuration", watchDuration);
+
+    // setPrevLocation((prev) => currentLocation);
+    // console.log("handleprogress - PrevLocation", prevLocation);
+    // console.log("handleprogress - currentLocation", currentLocation);
+  };
+
+  // update pause timestamps and locations
+  const handlePlay = () => {
+    // register pause events only if
+    // 1. video has been played for more than a second
+    // 2. present location pointer to the right of watched duration
+    // 3. do not register as multiple pauses if within a second of previous pause
+
+    const youtubePlayer: any = player;
+    const currentLocation = youtubePlayer.getCurrentTime();
+    const currentTimestamp = Math.floor(Date.now() / 1000);
+
+    setIsVideoPlaying(true);
+    if (
+      currentLocation > 1 &&
+      currentLocation > watchDuration &&
+      currentLocation - watchDuration < 1 &&
+      !isVideoPlaying
+    ) {
+      if (skippedDataPoints.length > 0) {
+        // this if else loop prevents registration of a pause within a second of a skip.
+        // checking if length of skippedTimestamps > 0 to apply the logic.
+        // if length = 0, then register a pause as there are no skips yet.
+        if (currentLocation - skippedDataPoints.slice(-1)[0].end > 1) {
+          setPauseDataPoints((prevDataPoints) => [
+            ...prevDataPoints,
+            { location: currentLocation, timestamp: currentTimestamp },
+          ]);
+        }
+      } else {
+        setPauseDataPoints((prevDataPoints) => [
+          ...prevDataPoints,
+          { location: currentLocation, timestamp: currentTimestamp },
+        ]);
+      }
+    }
+  };
+
+  // update watched locations (chunks of seconds the user has watched) when video ends
   const handleEnd = () => {
-    setWatchedLocation((prevLocations: Location[]) => [...prevLocations, { start: startPoint, end: watchDuration }]);
+    setIsVideoPlaying(false);
+    setWatchedDataPoints((prevDataPoints) => [...prevDataPoints, { start: startPoint, end: watchDuration }]);
     setUpdatedFlag(true);
   };
 
+  // update aggregate watched duration when watched locations has been updated
   if (updatedFlag) {
-    setAggWatchedDuration(calculateAggWatchedDuration(watchedLocation));
+    setAggWatchedDuration(calculateAggWatchedDuration(watchedDataPoints));
     setUpdatedFlag(false);
   }
 
-  // console.log("watchedLocation", watchedLocation);
-  // console.log("aggWatchedDuration", aggWatchedDuration);
+  // update locations and timestamps when playback speed is changed
+  const handlePlaybackRateChange = (event) => {
+    const youtubePlayer: any = event;
+    setPBRDataPoints((prevDataPoints) => [
+      ...prevDataPoints,
+      {
+        location: watchDuration,
+        timestamp: Math.floor(Date.now() / 1000),
+        speed: youtubePlayer.target.getPlaybackRate(),
+      },
+    ]);
+  };
+
+  useEffect(() => {
+    if (player) {
+      const youtubePlayer: any = player;
+      const currentLocation = youtubePlayer.getCurrentTime();
+      const currentTimestamp = Math.floor(Date.now() / 1000);
+      handleProgress(currentLocation, currentTimestamp);
+
+      const intervalId = setInterval(() => {
+        const currentLocation = youtubePlayer.getCurrentTime();
+        const currentTimestamp = Math.floor(Date.now() / 1000);
+
+        handleProgress(currentLocation, currentTimestamp);
+      }, 1000);
+
+      return () => {
+        clearInterval(intervalId);
+      };
+    }
+  }, [player]);
+
   return (
     <div>
       <div ref={divRef} className="flex justify-center">
-        <ReactPlayer
-          ref={playerRef}
-          // url="https://www.youtube.com/watch?v=RpaxxN8jTHo"
-          // url="https://www.youtube.com/watch?v=EiYm20F9WXU"
-          url="https://www.youtube.com/watch?v=d18ibbOWlXc"
-          controls
-          onProgress={handleProgress}
+        <YouTube
+          videoId="d18ibbOWlXc"
+          onPlay={() => handlePlay}
+          onPause={() => setIsVideoPlaying(false)}
+          onEnd={handleEnd}
+          onReady={(event) => setPlayer(event.target)}
           onPlaybackRateChange={handlePlaybackRateChange}
-          onPlay={() => {
-            setIsVideoPlaying(true);
-            handlePlay();
-          }}
-          onPause={() => {
-            setIsVideoPlaying(false);
-          }}
-          onEnded={() => {
-            setIsVideoPlaying(false);
-            handleEnd();
-          }}
         />
       </div>
       <br />
       <div>
-        <p className="text-xl">Watch Duration: {aggWatchedDuration.toFixed(2)} seconds</p>
+        <p className="text-xl">Watch Duration: {aggWatchedDuration} seconds</p>
         <p>
           Note: Watch Duration will update only on skips or the end of the video. I did code it to update in real time
           but that induced a lot of lag!
@@ -327,15 +329,10 @@ const VideoPlayer: React.FC = () => {
         <p className="text-2xl">Skipped Locations and Timestamps (in seconds):</p>
         <div className="flex justify-center">
           <ul className="p-1">
-            {skippedLocation.map((location, index) => (
+            {skippedDataPoints.map((dataPoint, index) => (
               <li key={index}>
-                {index + 1}. From {location.start.toFixed(2)} to {location.end.toFixed(2)}
+                {index + 1}. From {dataPoint.start}s to {dataPoint.end}s at {dataPoint.timestamp}
               </li>
-            ))}
-          </ul>
-          <ul className="p-1">
-            {skippedTimestamp.map((timestamp, index) => (
-              <li key={index}>at TS - {timestamp}</li>
             ))}
           </ul>
         </div>
@@ -345,15 +342,10 @@ const VideoPlayer: React.FC = () => {
         <p className="text-2xl">Modifications to Playback Speed:</p>
         <div className="flex justify-center">
           <ul className="p-1">
-            {speedChangeLocation.map((location, index) => (
+            {pbrDataPoints.map((dataPoint, index) => (
               <li key={index}>
-                {index + 1}. Set at {location.speed}x at {location.location.toFixed(2)} seconds
+                {index + 1}. Set to {dataPoint.speed}x at {dataPoint.location}s and {dataPoint.timestamp}
               </li>
-            ))}
-          </ul>
-          <ul className="p-1">
-            {speedChangeTimestamp.map((timestamp, index) => (
-              <li key={index}>at TS - {timestamp.timestamp}</li>
             ))}
           </ul>
         </div>
@@ -363,15 +355,10 @@ const VideoPlayer: React.FC = () => {
         <p className="text-2xl">Pause Locations and Timestamps:</p>
         <div className="flex justify-center">
           <ul className="p-1">
-            {pauseLocation.map((location, index) => (
+            {pauseDataPoints.map((dataPoint, index) => (
               <li key={index}>
-                {index + 1}. {location.toFixed(2)} seconds
+                {index + 1}. {dataPoint.location}s at {dataPoint.timestamp}
               </li>
-            ))}
-          </ul>
-          <ul className="p-1">
-            {pauseTimestamp.map((timestamp, index) => (
-              <li key={index}>at TS - {timestamp}</li>
             ))}
           </ul>
         </div>
@@ -379,64 +366,55 @@ const VideoPlayer: React.FC = () => {
         <hr />
         <br />
         <p className="text-2xl">Out-Of-Focus Timestamps:</p>
-        <div>
-          <ul>
-            {outOfFocusTimestamp.map((timestamp, index) => (
-              <li key={index}>
-                {index + 1}. From {timestamp.start} to {timestamp.end}
-              </li>
-            ))}
-          </ul>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="p-4">
+            <p>Went Out-Of-Focus:</p>
+            <ul>
+              {startPointOOFDataPoints.map((dataPoint, index) => (
+                <li key={index}>
+                  {index + 1}. {dataPoint.location}s at {dataPoint.timestamp}
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="p-4">
+            <p>Returned In-Focus:</p>
+            <ul>
+              {endPointOOFDataPoints.map((dataPoint, index) => (
+                <li key={index}>
+                  {index + 1}. {dataPoint.location}s at {dataPoint.timestamp}
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
         <br />
         <hr />
         <br />
         <p className="text-2xl">Tab Switch Timestamps:</p>
-        <div>
-          <ul>
-            {tabSwitchTimestamp.map((timestamp, index) => (
-              <li key={index}>
-                {index + 1}. Out-Of-Focus at {timestamp.start} | In-Focus at {timestamp.end}
-              </li>
-            ))}
-          </ul>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="p-4">
+            <p>Moved Out:</p>
+            <ul>
+              {startPointTSDataPoints.map((dataPoint, index) => (
+                <li key={index}>
+                  {index + 1}. {dataPoint.location}s at {dataPoint.timestamp}
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="p-4">
+            <p>Returned:</p>
+            <ul>
+              {endPointTSDataPoints.map((dataPoint, index) => (
+                <li key={index}>
+                  {index + 1}. {dataPoint.location}s at {dataPoint.timestamp}
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
       </div>
-      <br />
-      <br />
-      <br />
-      <br />
-      <br />
-      <br />
-      <br />
-      <br />
-      <br />
-      <br />
-      <br />
-      <br />
-      <br />
-      <br />
-      <br />
-      <br />
-      <br />
-      <br />
-      <br />
-      <br />
-      <br />
-      <br />
-      <br />
-      <br />
-      <br />
-      <br />
-      <br />
-      <br />
-      <br />
-      <br />
-      <br />
-      <br />
-      <br />
-      <br />
-      <br />
       <br />
       <br />
       <br />
